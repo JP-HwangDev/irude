@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>사진 업로드</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4CAF50"/>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Noto Sans KR', Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            width: 95%;
+            max-width: 480px;
+            background-color: white;
+            padding: 32px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            box-sizing: border-box;
+        }
+        h1 {
+            font-size: 22px;
+            text-align: center;
+            color: #2f4f4f;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 28px;
+        }
+        label {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            display: block;
+            color: #444;
+        }
+        .sub-label {
+            font-size: 12px;
+            color: #777;
+            margin-top: 2px;
+        }
+        input[type="file"],
+        textarea,
+        input[type="password"],
+        button {
+            width: 100%;
+            padding: 14px 12px;
+            font-size: 15px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+            transition: border 0.2s;
+            margin-top: 8px;
+        }
+        input:focus,
+        textarea:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            h1 {
+                font-size: 20px;
+            }
+            label, input, textarea, button {
+                font-size: 14px;
+            }
+            .sub-label {
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>写真アップロード</h1>
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data"
+          onsubmit="event.preventDefault(); getExifOrLocation();">
+        <div class="form-group">
+            <label for="file">写真を選択：</label>
+            <div class="sub-label">사진 선택: (카메라로 바로 찍거나 라이브러리에서 선택)</div>
+            <input type="file" id="file" name="file" accept="image/*" required>
+        </div>
+
+        <div class="form-group">
+            <label for="description">説明：</label>
+            <div class="sub-label">내용:</div>
+            <textarea id="description" name="description" placeholder="写真に関する説明を入力してください" required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="password">パスワード（8文字以上）：</label>
+            <div class="sub-label">비밀번호 (8자 이상):</div>
+            <input type="password" id="password" name="password" pattern=".{8,}" required>
+        </div>
+
+        <!-- 숨겨진 필드로 위치 정보 전달 -->
+        <input type="hidden" id="manual_lat" name="manual_lat">
+        <input type="hidden" id="manual_long" name="manual_long">
+
+        <button type="submit">アップロード</button>
+        <div class="sub-label" style="text-align:center; margin-top: 6px;">업로드</div>
+    </form>
+</div>
+
+<script>
+    function toDecimal([degrees, minutes, seconds], ref) {
+        let decimal = degrees + minutes / 60 + seconds / 3600;
+        return (ref === 'S' || ref === 'W') ? -decimal : decimal;
+    }
+
+    function getExifOrLocation() {
+        const fileInput = document.getElementById("file");
+        const file = fileInput.files[0];
+
+        if (!file) {
+            alert("사진을 선택해주세요.");
+            return;
+        }
+
+        const password = document.getElementById("password").value;
+        if (password.length < 8) {
+            alert("パスワードは8文字以上必要です。");
+            return;
+        }
+
+        EXIF.getData(file, function () {
+            const lat = EXIF.getTag(this, "GPSLatitude");
+            const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+            const lon = EXIF.getTag(this, "GPSLongitude");
+            const lonRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+            if (lat && lon && latRef && lonRef) {
+                const decimalLat = toDecimal(lat, latRef);
+                const decimalLon = toDecimal(lon, lonRef);
+                document.getElementById("manual_lat").value = decimalLat;
+                document.getElementById("manual_long").value = decimalLon;
+                document.getElementById("uploadForm").submit();
+            } else {
+                // EXIF에 위치 정보 없을 경우, 브라우저 위치 사용
+                getBrowserLocationAndSubmit();
+            }
+        });
+    }
+
+    function getBrowserLocationAndSubmit() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    document.getElementById("manual_lat").value = position.coords.latitude;
+                    document.getElementById("manual_long").value = position.coords.longitude;
+                    document.getElementById("uploadForm").submit();
+                },
+                (error) => {
+                    console.warn("위치 정보 없음 또는 오류:", error);
+                    document.getElementById("manual_lat").value = "";
+                    document.getElementById("manual_long").value = "";
+                    document.getElementById("uploadForm").submit();
+                },
+                { timeout: 10000, enableHighAccuracy: true }
+            );
+        } else {
+            alert("브라우저가 위치 정보를 지원하지 않습니다.");
+            document.getElementById("uploadForm").submit();
+        }
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>사진 지도</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#4CAF50"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Noto Sans KR', Arial, sans-serif;
+        }
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .leaflet-popup-content {
+            font-size: 15px;
+            color: #333;
+            line-height: 1.6;
+            word-break: break-word;
+            min-width: 220px;
+            max-width: 90vw;
+            display: flex;
+            justify-content: flex-start;
+            align-items: flex-start;
+        }
+
+        .popup-image {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            object-fit: cover;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .popup-info {
+            flex: 1;
+        }
+
+        .popup-info div {
+            margin-bottom: 8px;
+        }
+
+        .upload-btn {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 16px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            z-index: 999;
+            transition: background-color 0.3s;
+        }
+
+        .upload-btn:hover {
+            background-color: #45a049;
+        }
+
+        .thumbnail-marker {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 0 1px rgba(0,0,0,0.4) !important;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .thumbnail-marker img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+
+        .new-photo {
+            width: 40px;
+            height: 40px;
+            border: 5px solid #ff5733 !important;
+            border-radius: 50%;
+            box-shadow: 0 0 9px rgba(255, 87, 51, 0.6) !important;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .new-photo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+
+        /* 원본 이미지 모달 */
+        #imageModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #modalImage {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.6);
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<a href="/upload" class="upload-btn">사진 등록</a>
+
+<!-- 원본 이미지 모달 -->
+<div id="imageModal">
+    <img id="modalImage" src="">
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    var map = L.map('map').setView([34.3955, 132.4553], 5);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19
+    }).addTo(map);
+
+    var photos = {{ photos | tojson }};
+    photos.forEach(function(photo) {
+        var maskedIp;
+        if (photo.ip_address.includes('.')) {
+            var ipParts = photo.ip_address.split('.');
+            maskedIp = ipParts.length === 4 ?
+                `${ipParts[0]}.${ipParts[1]}.XX.XX` :
+                photo.ip_address;
+        } else if (photo.ip_address.includes(':')) {
+            var ipParts = photo.ip_address.split(':');
+            maskedIp = ipParts.slice(0, 2).join(':') + ':XXXX:XXXX:XXXX:XXXX';
+        } else {
+            maskedIp = photo.ip_address;
+        }
+
+        var uploadTime = new Date(photo.upload_time);
+        var currentTime = new Date();
+        var timeDiff = currentTime - uploadTime;
+        var isNewPhoto = timeDiff <= 24 * 60 * 60 * 1000;
+
+        var popupContent =
+            '<div style="display: flex; align-items: center;">' +
+            '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="' + photo.description + '" class="popup-image">' +
+            '<div class="popup-info">' +
+            '<div style="font-size:17px; font-weight:bold; color:#2f4f4f;">' + photo.description + '</div>' +
+            '<div style="font-size:12px; color:#777; margin-bottom:12px;">설명</div>' +
+            '<div style="font-size:13px;">Date: ' + (photo.date_taken || 'N/A') + '</div>' +
+            '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영일자</div>' +
+            '<div style="font-size:13px;">IP: ' + maskedIp + '</div>' +
+            '<div style="font-size:11px; color:#777; margin-bottom:10px;">아이피 주소</div>' +
+            '<div style="font-size:13px;">Device: ' + (photo.device_make || 'Unknown') + ' ' + (photo.device_model || '') + '</div>' +
+            '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영기기</div>' +
+            '<button onclick="deletePhoto(' + photo.id + ')">削除</button>' +
+            '<div style="font-size:11px; color:#777; margin-top:4px;">삭제</div>' +
+            '</div>' +
+            '</div>';
+
+        var thumbnailHtml =
+            '<div class="thumbnail-marker">' +
+            '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="썸네일">' +
+            '</div>';
+
+        var customIcon = L.divIcon({
+            html: thumbnailHtml,
+            className: isNewPhoto ? 'new-photo' : '',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20],
+            popupAnchor: [0, -20]
+        });
+
+        var obfLat = getObfuscatedCoord(photo.latitude);
+        var obfLng = getObfuscatedCoord(photo.longitude);
+
+        var marker = L.marker([obfLat, obfLng], { icon: customIcon }).addTo(map);
+        marker.bindPopup(popupContent);
+
+        L.circle([obfLat, obfLng], {
+            radius: 1000,
+            color: '#4CAF50',
+            fillColor: '#4CAF50',
+            fillOpacity: 0.15,
+            weight: 1,
+            interactive: false
+        }).addTo(map);
+    });
+
+    function getObfuscatedCoord(coord) {
+        var offset = (Math.random() - 0.5) * 0.02;
+        return coord + offset;
+    }
+
+    function deletePhoto(photoId) {
+        var userPassword = prompt("パスワードを入力してください。\n(삭제를 위해 비밀번호를 입력하세요)");
+        if (userPassword == null) return;
+
+        var formData = new FormData();
+        formData.append("photo_id", photoId);
+        formData.append("password", userPassword);
+
+        fetch("/delete", {
+            method: "POST",
+            body: formData
+        }).then(response => response.json())
+          .then(data => {
+              if (data.success) {
+                  alert("削除されました。\n(삭제되었습니다.)");
+                  location.reload();
+              } else {
+                  alert("削除に失敗しました: " + data.error + "\n(삭제 실패: " + data.error + ")");
+              }
+          }).catch(error => {
+              console.error("Error:", error);
+              alert("削除中にエラーが発生しました。\n(삭제 중 오류 발생.)");
+          });
+    }
+
+    // 모달 이미지 보기 기능
+    document.addEventListener("click", function(e) {
+        if (e.target.classList.contains("popup-image")) {
+            var thumbnailSrc = e.target.src;
+            var originalSrc = thumbnailSrc
+            .replace("/uploads/thumbnails/", "/uploads/")
+            .replace("thumb_", "");
+            var modal = document.getElementById("imageModal");
+            var modalImg = document.getElementById("modalImage");
+            modalImg.src = originalSrc;
+            modal.style.display = "flex";
+            e.stopPropagation();
+        } else if (e.target.id === "imageModal") {
+            e.target.style.display = "none";
+        }
+    });
+</script>
+</body>
+</html>
