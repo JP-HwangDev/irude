@@ -2,6 +2,7 @@ import os
 import shutil
 import sqlite3
 import uuid
+# import requests  # <-- 더 이상 사용하지 않으므로 제거
 from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -9,17 +10,22 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
-import piexif  # piexif 라이브러리 추가
+import piexif
 
+# jageocoder 추가
+import jageocoder
+
+jageocoder.init(url='https://jageocoder.info-proto.com/jsonrpc')
 app = FastAPI()
 
 UPLOAD_DIR = "uploads"
 THUMBNAIL_DIR = "uploads/thumbnails"
+
 for directory in [UPLOAD_DIR, THUMBNAIL_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 templates = Jinja2Templates(directory="templates")
 
 
@@ -33,7 +39,7 @@ def debug_print(message):
     print(message)
 
 
-# DB 테이블 생성 (upload_time 컬럼 추가됨)
+# DB 테이블 생성 (upload_time 컬럼 포함)
 with get_db_connection() as conn:
     cursor = conn.cursor()
     cursor.execute('''
@@ -54,6 +60,9 @@ with get_db_connection() as conn:
     ''')
     conn.commit()
 
+############################
+# jageocoder 초기화 부분 추가
+############################
 
 def get_exif_data(image):
     exif_data = {}
@@ -79,6 +88,10 @@ def get_geotagging(exif_data):
 
 
 def get_decimal_from_dms(dms, ref):
+    """
+    EXIF 내 GPS 정보(DMS)를 10진수(float)로 변환.
+    dms 형태: ((도가 분자, 분모), (분의 분자, 분모), (초의 분자, 분모)) 혹은 단순값
+    """
     if isinstance(dms[0], tuple):
         degrees = dms[0][0] / dms[0][1]
         minutes = dms[1][0] / dms[1][1]
@@ -99,31 +112,73 @@ def create_thumbnail(original_path, thumbnail_path, max_size=(200, 200)):
         img.save(thumbnail_path, "JPEG", quality=85)
 
 
+############################
+# jageocoder 기반 역지오코딩
+############################
+def get_japanese_address_from_latlng(lat, lng):
+    """
+    jageocoder 라이브러리를 이용해
+    (lat, lng)이 일본 내에 있을 경우 주소 풀네임을 반환하고,
+    아니라면 '주소 미확인'을 반환.
+    """
+    try:
+        # jageocoder.reverse() 는 (longitude, latitude) 순서
+        results = jageocoder.reverse(lng, lat, level=7)
+        if results and len(results) > 0:
+            # 가장 첫 번째 후보를 사용
+            candidate = results[0]['candidate']
+            # 예: candidate['fullname'] = ['東京都', '新宿区', ...]
+            # join 해서 문자열로 만든다.
+            full_address = ''.join(candidate.get('fullname', []))
+            return full_address
+        else:
+            return "주소 미확인"
+    except Exception as e:
+        print("역지오코딩 에러:", e)
+        return "주소 미확인"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, filename, thumbnail_filename, description, latitude, longitude, date_taken, ip_address, device_make, device_model, upload_time FROM photos")
+        cursor.execute("""
+            SELECT id, filename, thumbnail_filename, description,
+                   latitude, longitude, date_taken, ip_address,
+                   device_make, device_model, upload_time
+            FROM photos
+        """)
         photos = cursor.fetchall()
 
-    photo_list = [
-        {
+    photo_list = []
+    for photo in photos:
+        lat = float(photo["latitude"]) if photo["latitude"] is not None else None
+        lng = float(photo["longitude"]) if photo["longitude"] is not None else None
+
+        address = "주소 미확인"
+        if lat is not None and lng is not None:
+            address = get_japanese_address_from_latlng(lat, lng)
+
+        photo_list.append({
             "id": photo["id"],
             "filename": photo["filename"],
             "thumbnail_filename": photo["thumbnail_filename"],
             "original_filename": photo["filename"],
             "description": photo["description"],
-            "latitude": float(photo["latitude"]),
-            "longitude": float(photo["longitude"]),
+            "latitude": lat,
+            "longitude": lng,
             "date_taken": photo["date_taken"],
             "ip_address": photo["ip_address"],
             "device_make": photo["device_make"],
             "device_model": photo["device_model"],
-            "upload_time": photo["upload_time"]
-        } for photo in photos
-    ]
-    return templates.TemplateResponse("map.html", {"request": request, "photos": photo_list})
+            "upload_time": photo["upload_time"],
+            "address": address
+        })
+
+    return templates.TemplateResponse("map.html", {
+        "request": request,
+        "photos": photo_list
+    })
 
 
 @app.get("/upload", response_class=HTMLResponse)
@@ -133,12 +188,12 @@ async def upload_page(request: Request):
 
 @app.post("/upload")
 async def upload_photo(
-        request: Request,
-        file: UploadFile = File(...),
-        description: str = Form(...),
-        password: str = Form(...),
-        manual_lat: float = Form(None),
-        manual_long: float = Form(None)
+    request: Request,
+    file: UploadFile = File(...),
+    description: str = Form(...),
+    password: str = Form(...),
+    manual_lat: float = Form(None),
+    manual_long: float = Form(None)
 ):
     if len(password) < 8:
         return HTMLResponse("パスワードは8文字以上必要です。", status_code=400)
@@ -154,10 +209,8 @@ async def upload_photo(
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # 이미지 열기
+    # 이미지 EXIF 처리 및 회전
     image = Image.open(file_location)
-
-    # EXIF 처리 및 이미지 회전
     try:
         exif_bytes = image.info.get('exif')
         if exif_bytes:
@@ -187,6 +240,7 @@ async def upload_photo(
     image = Image.open(file_location)
     exif_data = get_exif_data(image)
     geotagging = get_geotagging(exif_data)
+
     latitude = None
     longitude = None
     date_taken = exif_data.get("DateTimeOriginal") if exif_data else None
@@ -199,22 +253,39 @@ async def upload_photo(
         if "GPSLongitude" in geotagging and "GPSLongitudeRef" in geotagging:
             longitude = get_decimal_from_dms(geotagging["GPSLongitude"], geotagging["GPSLongitudeRef"])
 
+    # 위/경도가 없으면 사용자가 수동 입력한 값 사용 (manual_lat, manual_long)
     if (latitude is None or longitude is None) and manual_lat is not None and manual_long is not None:
         latitude = manual_lat
         longitude = manual_long
     elif latitude is None or longitude is None:
-        latitude, longitude = 37.5665, 126.9780  # 기본값: 서울
+        # 둘 다 없으면 기본값(서울)로 설정
+        latitude, longitude = 37.5665, 126.9780
 
     upload_time = datetime.now().isoformat()
 
+    # DB 삽입
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO photos (filename, thumbnail_filename, description, latitude, longitude, date_taken, ip_address, device_make, device_model, password, upload_time)
+            INSERT INTO photos (
+                filename, thumbnail_filename, description,
+                latitude, longitude, date_taken, ip_address,
+                device_make, device_model, password, upload_time
+            )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            unique_filename, thumbnail_filename, description, latitude, longitude, date_taken, ip_address,
-            device_make, device_model, password, upload_time))
+            unique_filename,
+            thumbnail_filename,
+            description,
+            latitude,
+            longitude,
+            date_taken,
+            ip_address,
+            device_make,
+            device_model,
+            password,
+            upload_time
+        ))
         conn.commit()
 
     return RedirectResponse("/", status_code=303)
@@ -230,17 +301,21 @@ async def delete_photo(photo_id: int = Form(...), password: str = Form(...)):
             return JSONResponse({"success": False, "error": "写真が見つかりません。"})
         if record["password"] != password:
             return JSONResponse({"success": False, "error": "パスワードが間違っています。"})
+
+        # 삭제
         cursor.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
         conn.commit()
+
+        # 실제 파일 삭제
         try:
             os.remove(os.path.join(UPLOAD_DIR, record["filename"]))
             os.remove(os.path.join(THUMBNAIL_DIR, record["thumbnail_filename"]))
         except Exception as e:
             print("ファイル削除中のエラー:", e)
+
     return JSONResponse({"success": True})
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)

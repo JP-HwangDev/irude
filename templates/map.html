@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>사진 지도</title>
+    <title>いるで</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#4CAF50"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -146,43 +146,51 @@
     var photos = {{ photos | tojson }};
     photos.forEach(function(photo) {
         var maskedIp;
-        if (photo.ip_address.includes('.')) {
+        if (photo.ip_address && photo.ip_address.includes('.')) {
             var ipParts = photo.ip_address.split('.');
-            maskedIp = ipParts.length === 4 ?
-                `${ipParts[0]}.${ipParts[1]}.XX.XX` :
-                photo.ip_address;
-        } else if (photo.ip_address.includes(':')) {
+            maskedIp = ipParts.length === 4
+                ? `${ipParts[0]}.${ipParts[1]}.XX.XX`
+                : photo.ip_address;
+        } else if (photo.ip_address && photo.ip_address.includes(':')) {
             var ipParts = photo.ip_address.split(':');
             maskedIp = ipParts.slice(0, 2).join(':') + ':XXXX:XXXX:XXXX:XXXX';
         } else {
-            maskedIp = photo.ip_address;
+            maskedIp = photo.ip_address || 'N/A';
         }
 
         var uploadTime = new Date(photo.upload_time);
         var currentTime = new Date();
         var timeDiff = currentTime - uploadTime;
-        var isNewPhoto = timeDiff <= 24 * 60 * 60 * 1000;
+        var isNewPhoto = timeDiff <= 24 * 60 * 60 * 1000; // 24시간 이내 업로드 시 new-photo 표시
 
+        // 팝업 내용에 주소를 추가로 표시 (photo.address)
         var popupContent =
             '<div style="display: flex; align-items: center;">' +
-            '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="' + photo.description + '" class="popup-image">' +
-            '<div class="popup-info">' +
-            '<div style="font-size:17px; font-weight:bold; color:#2f4f4f;">' + photo.description + '</div>' +
-            '<div style="font-size:12px; color:#777; margin-bottom:12px;">설명</div>' +
-            '<div style="font-size:13px;">Date: ' + (photo.date_taken || 'N/A') + '</div>' +
-            '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영일자</div>' +
-            '<div style="font-size:13px;">IP: ' + maskedIp + '</div>' +
-            '<div style="font-size:11px; color:#777; margin-bottom:10px;">아이피 주소</div>' +
-            '<div style="font-size:13px;">Device: ' + (photo.device_make || 'Unknown') + ' ' + (photo.device_model || '') + '</div>' +
-            '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영기기</div>' +
-            '<button onclick="deletePhoto(' + photo.id + ')">削除</button>' +
-            '<div style="font-size:11px; color:#777; margin-top:4px;">삭제</div>' +
-            '</div>' +
+                '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="' + photo.description + '" class="popup-image">' +
+                '<div class="popup-info">' +
+                    '<div style="font-size:17px; font-weight:bold; color:#2f4f4f;">' + photo.description + '</div>' +
+                    '<div style="font-size:12px; color:#777; margin-bottom:12px;">설명</div>' +
+
+                    '<div style="font-size:13px;">Address: ' + (photo.address || 'N/A') + '</div>' +  /* 주소 표시 부분 */
+                    '<div style="font-size:11px; color:#777; margin-bottom:10px;">(역지오코딩 결과)</div>' +
+
+                    '<div style="font-size:13px;">Date: ' + (photo.date_taken || 'N/A') + '</div>' +
+                    '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영일자</div>' +
+
+                    '<div style="font-size:13px;">IP: ' + maskedIp + '</div>' +
+                    '<div style="font-size:11px; color:#777; margin-bottom:10px;">아이피 주소</div>' +
+
+                    '<div style="font-size:13px;">Device: ' + (photo.device_make || 'Unknown') + ' ' + (photo.device_model || '') + '</div>' +
+                    '<div style="font-size:11px; color:#777; margin-bottom:10px;">촬영기기</div>' +
+
+                    '<button onclick="deletePhoto(' + photo.id + ')">削除</button>' +
+                    '<div style="font-size:11px; color:#777; margin-top:4px;">삭제</div>' +
+                '</div>' +
             '</div>';
 
         var thumbnailHtml =
             '<div class="thumbnail-marker">' +
-            '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="썸네일">' +
+                '<img src="/uploads/thumbnails/' + photo.thumbnail_filename + '" alt="썸네일">' +
             '</div>';
 
         var customIcon = L.divIcon({
@@ -193,6 +201,7 @@
             popupAnchor: [0, -20]
         });
 
+        // 지도 마커에 약간의 랜덤 offset을 줘서 정확 좌표 노출을 방지
         var obfLat = getObfuscatedCoord(photo.latitude);
         var obfLng = getObfuscatedCoord(photo.longitude);
 
@@ -225,18 +234,20 @@
         fetch("/delete", {
             method: "POST",
             body: formData
-        }).then(response => response.json())
-          .then(data => {
-              if (data.success) {
-                  alert("削除されました。\n(삭제되었습니다.)");
-                  location.reload();
-              } else {
-                  alert("削除に失敗しました: " + data.error + "\n(삭제 실패: " + data.error + ")");
-              }
-          }).catch(error => {
-              console.error("Error:", error);
-              alert("削除中にエラーが発生しました。\n(삭제 중 오류 발생.)");
-          });
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert("削除されました。\n(삭제되었습니다.)");
+                location.reload();
+            } else {
+                alert("削除に失敗しました: " + data.error + "\n(삭제 실패: " + data.error + ")");
+            }
+        })
+        .catch(error => {
+            console.error("Error:", error);
+            alert("削除中にエラーが発生しました。\n(삭제 중 오류 발생.)");
+        });
     }
 
     // 모달 이미지 보기 기능
@@ -244,10 +255,12 @@
         if (e.target.classList.contains("popup-image")) {
             var thumbnailSrc = e.target.src;
             var originalSrc = thumbnailSrc
-            .replace("/uploads/thumbnails/", "/uploads/")
-            .replace("thumb_", "");
+                .replace("/uploads/thumbnails/", "/uploads/")
+                .replace("thumb_", "");
+
             var modal = document.getElementById("imageModal");
             var modalImg = document.getElementById("modalImage");
+
             modalImg.src = originalSrc;
             modal.style.display = "flex";
             e.stopPropagation();
