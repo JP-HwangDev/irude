@@ -125,10 +125,7 @@ def get_japanese_address_from_latlng(lat, lng):
         # jageocoder.reverse() 는 (longitude, latitude) 순서
         results = jageocoder.reverse(lng, lat, level=7)
         if results and len(results) > 0:
-            # 가장 첫 번째 후보를 사용
             candidate = results[0]['candidate']
-            # 예: candidate['fullname'] = ['東京都', '新宿区', ...]
-            # join 해서 문자열로 만든다.
             full_address = ''.join(candidate.get('fullname', []))
             return full_address
         else:
@@ -247,13 +244,17 @@ async def upload_photo(
     device_make = exif_data.get("Make", "Unknown") if exif_data else "Unknown"
     device_model = exif_data.get("Model", "Unknown") if exif_data else "Unknown"
 
+    # 날짜 정보가 없으면 현재 날짜/시간으로 설정 (YYYY:MM:DD HH:MM:SS)
+    if not date_taken:
+        date_taken = datetime.now().strftime('%Y:%m:%d %H:%M:%S')
+
     if geotagging:
         if "GPSLatitude" in geotagging and "GPSLatitudeRef" in geotagging:
             latitude = get_decimal_from_dms(geotagging["GPSLatitude"], geotagging["GPSLatitudeRef"])
         if "GPSLongitude" in geotagging and "GPSLongitudeRef" in geotagging:
             longitude = get_decimal_from_dms(geotagging["GPSLongitude"], geotagging["GPSLongitudeRef"])
 
-    # 위/경도가 없으면 사용자가 수동 입력한 값 사용 (manual_lat, manual_long)
+    # 위/경도가 없으면 사용자가 수동 입력한 값 사용
     if (latitude is None or longitude is None) and manual_lat is not None and manual_long is not None:
         latitude = manual_lat
         longitude = manual_long
