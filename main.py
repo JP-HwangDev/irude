@@ -116,10 +116,17 @@ def get_decimal_from_dms(dms, ref):
 
 
 def create_thumbnail(original_path, thumbnail_path, max_size=(200, 200)):
-    with Image.open(original_path) as img:
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
-        img.save(thumbnail_path, "JPEG", quality=85)
+    try:
+        with Image.open(original_path) as img:
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+
+            img.save(thumbnail_path, "JPEG", quality=85)
+
+    except Exception as e:
+        print("썸네일 생성 실패:", e)
 
 ############################
 # jageocoder 기반 역지오코딩
@@ -271,8 +278,8 @@ async def upload_photo(
         except ValueError:
             pass  # 숫자 변환 실패 시 무시
     elif latitude is None or longitude is None:
-        # 둘 다 없으면 기본값(도쿄 타워)로 설정
-        latitude, longitude = 35.6586, 139.7454
+        # 둘 다 없으면 홋카이도(삿포로 중심)으로 설정
+        latitude, longitude = 43.06417, 141.34694
 
     upload_time = datetime.now().isoformat()
 
