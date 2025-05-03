@@ -18,19 +18,27 @@ import jageocoder
 jageocoder.init(url='https://jageocoder.info-proto.com/jsonrpc')
 app = FastAPI()
 
-UPLOAD_DIR = "uploads"
-THUMBNAIL_DIR = "uploads/thumbnails"
+########################################
+# ✅ 1단계: 상위 디렉터리(volumes) 지정
+########################################
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'volumes'))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+THUMBNAIL_DIR = os.path.join(UPLOAD_DIR, "thumbnails")
+DB_PATH = os.path.join(BASE_DIR, "photos.db")
 
-for directory in [UPLOAD_DIR, THUMBNAIL_DIR]:
+# 디렉터리 없으면 생성
+for directory in [BASE_DIR, UPLOAD_DIR, THUMBNAIL_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+# 정적 파일(업로드 이미지) 서빙
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 templates = Jinja2Templates(directory="templates")
 
 
 def get_db_connection():
-    conn = sqlite3.connect("photos.db", check_same_thread=False)
+    # ✅ DB도 volumes 하위에 저장
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
