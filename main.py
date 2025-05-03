@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 import piexif
+from typing import Optional
 
 # jageocoder 추가
 import jageocoder
@@ -197,8 +198,8 @@ async def upload_photo(
     file: UploadFile = File(...),
     description: str = Form(...),
     password: str = Form(...),
-    manual_lat: float = Form(None),
-    manual_long: float = Form(None)
+    manual_lat: Optional[str] = Form(None),
+    manual_long: Optional[str] = Form(None)
 ):
     if len(password) < 8:
         return HTMLResponse("パスワードは8文字以上必要です。", status_code=400)
@@ -263,12 +264,15 @@ async def upload_photo(
             longitude = get_decimal_from_dms(geotagging["GPSLongitude"], geotagging["GPSLongitudeRef"])
 
     # 위/경도가 없으면 사용자가 수동 입력한 값 사용
-    if (latitude is None or longitude is None) and manual_lat is not None and manual_long is not None:
-        latitude = manual_lat
-        longitude = manual_long
+    if (latitude is None or longitude is None) and manual_lat and manual_long:
+        try:
+            latitude = float(manual_lat)
+            longitude = float(manual_long)
+        except ValueError:
+            pass  # 숫자 변환 실패 시 무시
     elif latitude is None or longitude is None:
-        # 둘 다 없으면 기본값(서울)로 설정
-        latitude, longitude = 37.5665, 126.9780
+        # 둘 다 없으면 기본값(도쿄 타워)로 설정
+        latitude, longitude = 35.6586, 139.7454
 
     upload_time = datetime.now().isoformat()
 
