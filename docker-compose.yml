@@ -1,0 +1,14 @@
+services:
+  Irude:
+    build:
+      context: ./irude
+      dockerfile: Dockerfile
+    image: fastapi_irude
+    container_name: fastapi_irude
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./volumes:/volumes
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
